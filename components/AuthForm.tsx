@@ -11,6 +11,10 @@ import { useRouter } from "next/navigation"
 import FormField from "./FormField"
 import { toast } from "sonner"
 
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth"
+import { auth } from "@/firebase/client"
+import { signIn, signUp } from "@/lib/actions/auth.action"
+
 const authFormSchema = (type: FormType) => {
   return z.object({
     name: type === 'sign-up' ? z.string().min(3) : z.string().optional(),
@@ -35,27 +39,66 @@ const AuthForm = ({ type } : { type : FormType }) => {
   })
 
   // 2. Define a submit handler
-  function onSubmit(data: z.infer<typeof formSchema>) {
+  const onSubmit = async (data: z.infer<typeof formSchema>) => {
     // Handle form submission
     try {
       if (type === "sign-up") {
         const { name, email, password } = data;
 
-        // Firebase sign up logic here
+        // Firebase sign up logic
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
+
+        const result = await signUp({
+          uid: userCredential.user.uid,
+          name: name!,
+          email,
+          password
+        });
+
+        if(!result?.success) {
+          toast.error(result?.message);
+          return;
+        }
 
         toast.success("Account created successfully. Please sign in.")
         router.push("/sign-in")
       } else {
+        // Sign in logic
         const { email, password } = data
 
-        // Firebase sign in logic here
+        // Authenticate user(returns userCredential object if sign-in is successful)
+        const userCredential = await signInWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
+
+        // Retrieves a short-lived ID token for the signed-in user.
+        const idToken = await userCredential.user.getIdToken()
+        if (!idToken) {
+          toast.error("Sign in Failed. Please try again.")
+          return;
+        }
+
+        await signIn({ email, idToken })
 
         toast.success('Signed in successfully.')
+        // router.refresh(); // Ensures server layout re-reads cookies
         router.push("/")
       }
-    } catch (error) {
-      console.log(error)
-      toast.error(`There was an error ${error}`)
+    } catch (error: any) {
+        if (error.code === "auth/email-already-in-use") {
+          toast.error("This email is already in use.");
+        } else if (error.code === "auth/invalid-login-credentials") {
+          toast.error("Invalid email or password.");
+        } else {
+          console.error(error);
+          toast.error("There was an error. Please try again.");
+        }
     }
   }
 
@@ -112,7 +155,5 @@ const AuthForm = ({ type } : { type : FormType }) => {
     </div>
   )
 }
-console.log("🧪 AuthForm is:", typeof AuthForm);
-console.log("FormField is:", FormField); // Should be a function
 
 export default AuthForm
